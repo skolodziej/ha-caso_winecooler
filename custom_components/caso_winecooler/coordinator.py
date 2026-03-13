@@ -1,5 +1,7 @@
 """Data update coordinator for CASO Wine Cooler."""
+import asyncio
 import logging
+import time
 from datetime import timedelta
 
 import aiohttp
@@ -10,6 +12,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import API_BASE
 
 _LOGGER = logging.getLogger(__name__)
+
+# Minimum seconds between any two API requests (stays well within 5 req/min limit)
+_MIN_REQUEST_INTERVAL = 15.0
 
 
 class CasoWinecoolerCoordinator(DataUpdateCoordinator):
@@ -32,6 +37,8 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
         self.api_key = api_key
         self.device_id = device_id
         self.device_name = device_name
+        self._request_lock = asyncio.Lock()
+        self._last_request_time: float = 0.0
 
     def _headers(self) -> dict:
         return {
@@ -40,52 +47,63 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
             "Accept": "application/json",
         }
 
+    async def _throttled_post(self, url: str, payload: dict) -> dict | None:
+        """Execute a POST request, enforcing a minimum interval between requests."""
+        async with self._request_lock:
+            elapsed = time.monotonic() - self._last_request_time
+            if elapsed < _MIN_REQUEST_INTERVAL:
+                wait = _MIN_REQUEST_INTERVAL - elapsed
+                _LOGGER.debug("Rate limit: waiting %.1fs before next request", wait)
+                await asyncio.sleep(wait)
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=self._headers(),
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as resp:
+                        self._last_request_time = time.monotonic()
+                        if resp.status == 429:
+                            raise UpdateFailed("API rate limit exceeded (429) — try increasing the polling interval")
+                        if resp.status == 401:
+                            raise UpdateFailed("Invalid API key (401 Unauthorized)")
+                        if resp.status == 403:
+                            raise UpdateFailed("Access denied (403 Forbidden)")
+                        if resp.status not in (200, 204):
+                            raise UpdateFailed(f"Unexpected API response: {resp.status}")
+                        if resp.status == 200:
+                            data = await resp.json()
+                            _LOGGER.debug("Response from %s: %s", url, data)
+                            return data
+                        return None
+            except aiohttp.ClientError as err:
+                raise UpdateFailed(f"Connection error: {err}") from err
+
     async def _async_update_data(self) -> dict:
-        """Fetch current status from the CASO API (1 request per poll)."""
-        url = f"{API_BASE}/Winecooler/Status"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    headers=self._headers(),
-                    json={"technicalDeviceId": self.device_id},
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
-                    if resp.status == 401:
-                        raise UpdateFailed("Invalid API key (401 Unauthorized)")
-                    if resp.status == 403:
-                        raise UpdateFailed("Access denied (403 Forbidden)")
-                    if resp.status != 200:
-                        raise UpdateFailed(f"Unexpected API response: {resp.status}")
-                    data = await resp.json()
-                    _LOGGER.debug("Status for %s: %s", self.device_id, data)
-                    return data
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Connection error: {err}") from err
+        """Fetch current status (1 request per poll interval)."""
+        result = await self._throttled_post(
+            f"{API_BASE}/Winecooler/Status",
+            {"technicalDeviceId": self.device_id},
+        )
+        if result is None:
+            raise UpdateFailed("Empty response from status endpoint")
+        return result
 
     async def async_set_light(self, zone: int, light_on: bool) -> None:
-        """Send SetLight command and refresh coordinator data from the response."""
-        url = f"{API_BASE}/Winecooler/SetLight"
+        """Send SetLight command; update coordinator state from the response."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    headers=self._headers(),
-                    json={
-                        "technicalDeviceId": self.device_id,
-                        "zone": zone,
-                        "lightOn": light_on,
-                    },
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
-                    if resp.status not in (200, 204):
-                        raise ValueError(f"SetLight failed: {resp.status}")
-                    if resp.status == 200:
-                        # Update coordinator data directly from the response
-                        # so we don't need an extra poll request
-                        data = await resp.json()
-                        if data:
-                            self.async_set_updated_data(data)
-        except aiohttp.ClientError as err:
-            _LOGGER.error("SetLight request failed: %s", err)
+            data = await self._throttled_post(
+                f"{API_BASE}/Winecooler/SetLight",
+                {
+                    "technicalDeviceId": self.device_id,
+                    "zone": zone,
+                    "lightOn": light_on,
+                },
+            )
+            if data:
+                self.async_set_updated_data(data)
+        except UpdateFailed as err:
+            _LOGGER.error("SetLight failed: %s", err)
             raise
