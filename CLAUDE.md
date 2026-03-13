@@ -4,15 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Home Assistant custom integration for the CASO Wine Cooler, installed via HACS from a private GitHub repository. There are no build steps, no tests, and no linter config — changes are deployed by pushing to GitHub and updating via HACS.
+A Home Assistant custom integration for the CASO Wine Cooler, installed via HACS from a public GitHub repository. There are no build steps, no tests, and no linter config — changes are deployed by pushing to GitHub and creating a release.
 
 ## Deployment
 
 1. Push changes to `main`
-2. In HA: **HACS → CASO Wine Cooler → 3-dot menu → Redownload**
-3. Restart Home Assistant
+2. Bump `version` in `manifest.json` (semver: `1.0.0` → `1.0.1`)
+3. On GitHub: **Releases → Draft a new release → Tag** = `v<version>` → Publish
+4. In HA: **HACS → CASO Wine Cooler → Update**
+5. Restart Home Assistant
 
-HACS tracks the `main` branch by commit hash (no releases used). "Redownload" always fetches the latest commit immediately; otherwise HACS checks automatically every ~1h.
+HACS matches the GitHub release tag against `manifest.json`. Without a new release, HACS will not show an update to end users.
 
 ## API
 

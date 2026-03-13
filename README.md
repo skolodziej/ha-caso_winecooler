@@ -38,9 +38,7 @@ Integrates CASO wine coolers into Home Assistant via the [CASO Smart Kitchen API
 
 ## Updating
 
-Since this repository uses no releases, HACS tracks the `main` branch directly:
-
-1. **HACS → Integrations → CASO Wine Cooler → ⋮ → Redownload**
+1. **HACS → Integrations → CASO Wine Cooler → Update**
 2. Restart Home Assistant
 
 ## Rate limiting

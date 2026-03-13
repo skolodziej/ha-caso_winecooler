@@ -39,10 +39,7 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
         self.device_id = device_id
         self.device_name = device_name
         self._request_lock = asyncio.Lock()
-        # Treat coordinator creation as a recent request so the first poll waits
-        # the full throttle interval — avoids a 429 when the config flow just
-        # made a request seconds before setup completes.
-        self._last_request_time: float = time.monotonic()
+        self._last_request_time: float = 0.0
 
     def _headers(self) -> dict:
         return {
@@ -90,27 +87,48 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict:
         """Fetch current status (1 request per poll interval)."""
-        result = await self._throttled_post(
-            f"{API_BASE}/Winecooler/Status",
-            {"technicalDeviceId": self.device_id},
-        )
+        try:
+            result = await self._throttled_post(
+                f"{API_BASE}/Winecooler/Status",
+                {"technicalDeviceId": self.device_id},
+            )
+        except UpdateFailed as err:
+            if "429" in str(err) and self.data is not None:
+                _LOGGER.warning("Rate limited (429), keeping last known state")
+                return self.data
+            raise
         if result is None:
             raise UpdateFailed("Empty response from status endpoint")
         return result
 
     async def async_set_light(self, zone: int, light_on: bool) -> None:
-        """Send SetLight command; update coordinator state from the response."""
+        """Send SetLight command directly — no throttle wait so the UI responds immediately."""
         try:
-            data = await self._throttled_post(
+            session = async_get_clientsession(self.hass)
+            async with session.post(
                 f"{API_BASE}/Winecooler/SetLight",
-                {
+                headers=self._headers(),
+                json={
                     "technicalDeviceId": self.device_id,
                     "zone": zone,
                     "lightOn": light_on,
                 },
-            )
-            if data:
-                self.async_set_updated_data(data)
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                self._last_request_time = time.monotonic()
+                if resp.status == 429:
+                    raise UpdateFailed("API rate limit exceeded (429)")
+                if resp.status not in (200, 204):
+                    raise UpdateFailed(f"SetLight failed: {resp.status}")
+                if resp.status == 200:
+                    try:
+                        data = await resp.json(content_type=None)
+                    except Exception as err:
+                        raise UpdateFailed(f"Invalid JSON response: {err}") from err
+                    if data:
+                        self.async_set_updated_data(data)
+        except aiohttp.ClientError as err:
+            raise UpdateFailed(f"Connection error: {err}") from err
         except UpdateFailed as err:
             _LOGGER.error("SetLight failed: %s", err)
             raise

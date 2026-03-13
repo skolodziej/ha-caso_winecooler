@@ -1,7 +1,7 @@
 {
   "domain": "caso_winecooler",
   "name": "CASO Wine Cooler",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://publickitchenapi.casoapp.com/swagger/index.html",
   "requirements": [],
   "dependencies": [],
