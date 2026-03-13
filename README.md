@@ -8,6 +8,7 @@ Integrates CASO wine coolers into Home Assistant via the [CASO Smart Kitchen API
 
 - Current temperature per zone (sensor)
 - Target temperature per zone (sensor)
+- Last device report timestamp (sensor)
 - Interior light control — all zones at once or individually (light)
 - Power state per zone (binary sensor)
 - Automatic single-zone / two-zone detection
@@ -20,10 +21,6 @@ Integrates CASO wine coolers into Home Assistant via the [CASO Smart Kitchen API
 
 - [HACS](https://hacs.xyz) installed
 - A CASO API key — get one at [casoapp.com/apikey](https://www.casoapp.com/apikey)
-
-### Finding your Device ID
-
-Go to [casoapp.com/devices](https://www.casoapp.com/devices), click the wrench icon next to your device and copy the Technical Device ID shown there.
 
 ### Add the repository
 
@@ -39,6 +36,15 @@ Go to [casoapp.com/devices](https://www.casoapp.com/devices), click the wrench i
 3. Select your device
 4. Optionally adjust the polling interval (default: 600 s / 10 min)
 
+## Updating
+
+Since this repository uses no releases, HACS tracks the `main` branch directly:
+
+1. **HACS → Integrations → CASO Wine Cooler → ⋮ → Redownload**
+2. Restart Home Assistant
+
 ## Rate limiting
 
 The CASO API has an undocumented rate limit. The integration enforces a minimum of 15 seconds between requests and defaults to polling every 10 minutes. Light commands consume one request but update state immediately from the API response without an additional poll.
+
+On first setup the integration intentionally waits 15 seconds before its first status poll to avoid conflicts with the API key validation request made during setup.
