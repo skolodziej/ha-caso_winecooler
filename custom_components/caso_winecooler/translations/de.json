@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CASO Weinkühlschrank",
+        "description": "Gib deinen CASO API-Key ein. Du findest ihn in der CASO App unter Einstellungen → API.",
+        "data": {
+          "api_key": "API-Key"
+        }
+      },
+      "device": {
+        "title": "Gerät auswählen",
+        "description": "Wähle den Weinkühlschrank aus und lege das Abfrageintervall fest.",
+        "data": {
+          "device_id": "Gerät",
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zur CASO API fehlgeschlagen",
+      "invalid_auth": "Ungültiger API-Key",
+      "no_devices": "Keine Geräte für diesen Account gefunden"
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits eingerichtet"
+    }
+  }
+}

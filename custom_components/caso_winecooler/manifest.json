@@ -1,0 +1,11 @@
+{
+  "domain": "caso_winecooler",
+  "name": "CASO Wine Cooler",
+  "version": "1.0.0",
+  "documentation": "https://publickitchenapi.casoapp.com/swagger/index.html",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [],
+  "config_flow": true,
+  "iot_class": "cloud_polling"
+}
