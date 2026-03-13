@@ -114,7 +114,9 @@ class CasoTemperatureSensor(CasoEntity, SensorEntity):
         return raw
 
     @property
-    def native_unit_of_measurement(self) -> str:
+    def native_unit_of_measurement(self) -> str | None:
+        if self.entity_description.device_class != SensorDeviceClass.TEMPERATURE:
+            return None
         if self.coordinator.data and self.coordinator.data.get("temperatureUnit") == "F":
             return UnitOfTemperature.FAHRENHEIT
         return UnitOfTemperature.CELSIUS
