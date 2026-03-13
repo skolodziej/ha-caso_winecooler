@@ -11,10 +11,10 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_DEVICE_ID, CONF_DEVICE_NAME, DOMAIN
+from .const import DOMAIN
 from .coordinator import CasoWinecoolerCoordinator
+from .entity import CasoEntity, is_two_zone
 
 
 @dataclass(frozen=True)
@@ -41,10 +41,6 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[CasoBinarySensorDescription, ...] = (
 )
 
 
-def _is_two_zone(data: dict) -> bool:
-    return data.get("temperature2") is not None
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -52,7 +48,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator: CasoWinecoolerCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    two_zone = _is_two_zone(data)
+    two_zone = is_two_zone(data)
 
     entities = [
         CasoPowerSensor(coordinator, entry, desc)
@@ -62,34 +58,10 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class CasoPowerSensor(
-    CoordinatorEntity[CasoWinecoolerCoordinator], BinarySensorEntity
-):
+class CasoPowerSensor(CasoEntity, BinarySensorEntity):
     """Indicates whether a zone is powered on."""
 
     entity_description: CasoBinarySensorDescription
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: CasoWinecoolerCoordinator,
-        entry: ConfigEntry,
-        description: CasoBinarySensorDescription,
-    ) -> None:
-        super().__init__(coordinator)
-        self.entity_description = description
-        self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_{description.key}"
-        self._device_name = entry.data.get(CONF_DEVICE_NAME, coordinator.device_id)
-        self._device_id = entry.data[CONF_DEVICE_ID]
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "name": self._device_name,
-            "manufacturer": "CASO",
-            "model": "Wine Cooler",
-        }
 
     @property
     def is_on(self) -> bool | None:

@@ -7,6 +7,7 @@ from datetime import timedelta
 import aiohttp
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import API_BASE
@@ -57,27 +58,30 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(wait)
 
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        url,
-                        headers=self._headers(),
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=30),
-                    ) as resp:
-                        self._last_request_time = time.monotonic()
-                        if resp.status == 429:
-                            raise UpdateFailed("API rate limit exceeded (429) — try increasing the polling interval")
-                        if resp.status == 401:
-                            raise UpdateFailed("Invalid API key (401 Unauthorized)")
-                        if resp.status == 403:
-                            raise UpdateFailed("Access denied (403 Forbidden)")
-                        if resp.status not in (200, 204):
-                            raise UpdateFailed(f"Unexpected API response: {resp.status}")
-                        if resp.status == 200:
-                            data = await resp.json()
-                            _LOGGER.debug("Response from %s: %s", url, data)
-                            return data
-                        return None
+                session = async_get_clientsession(self.hass)
+                async with session.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    self._last_request_time = time.monotonic()
+                    if resp.status == 429:
+                        raise UpdateFailed("API rate limit exceeded (429) — try increasing the polling interval")
+                    if resp.status == 401:
+                        raise UpdateFailed("Invalid API key (401 Unauthorized)")
+                    if resp.status == 403:
+                        raise UpdateFailed("Access denied (403 Forbidden)")
+                    if resp.status not in (200, 204):
+                        raise UpdateFailed(f"Unexpected API response: {resp.status}")
+                    if resp.status == 200:
+                        try:
+                            data = await resp.json(content_type=None)
+                        except Exception as err:
+                            raise UpdateFailed(f"Invalid JSON response: {err}") from err
+                        _LOGGER.debug("Response from %s: keys=%s", url, list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+                        return data
+                    return None
             except aiohttp.ClientError as err:
                 raise UpdateFailed(f"Connection error: {err}") from err
 

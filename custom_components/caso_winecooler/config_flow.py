@@ -31,15 +31,20 @@ async def _fetch_devices(api_key: str) -> list[dict]:
     }
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f"https://publickitchenapi.casoapp.com/api/v1.2/Devices/GetDevices",
+            f"{API_BASE}/Devices/GetDevices",
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status == 401:
                 raise ValueError("invalid_auth")
+            if resp.status == 429:
+                raise ValueError("rate_limit")
             if resp.status != 200:
                 raise ValueError("cannot_connect")
-            return await resp.json()
+            try:
+                return await resp.json(content_type=None)
+            except Exception as err:
+                raise ValueError("cannot_connect") from err
 
 
 async def _validate_api_key(hass: HomeAssistant, api_key: str) -> list[dict]:
