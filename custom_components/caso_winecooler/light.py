@@ -8,7 +8,9 @@ from typing import Any
 from homeassistant.components.light import ColorMode, LightEntity, LightEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import DOMAIN
 from .coordinator import CasoWinecoolerCoordinator
@@ -85,10 +87,16 @@ class CasoLightEntity(CasoEntity, LightEntity):
         return bool(self.coordinator.data.get(self.entity_description.data_key))
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_light(zone=self.entity_description.zone, light_on=True)
+        try:
+            await self.coordinator.async_set_light(zone=self.entity_description.zone, light_on=True)
+        except UpdateFailed as err:
+            raise HomeAssistantError(str(err)) from err
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_light(zone=self.entity_description.zone, light_on=False)
+        try:
+            await self.coordinator.async_set_light(zone=self.entity_description.zone, light_on=False)
+        except UpdateFailed as err:
+            raise HomeAssistantError(str(err)) from err
 
 
 class CasoAllZonesLightEntity(CasoLightEntity):
