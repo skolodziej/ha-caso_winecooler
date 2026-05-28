@@ -1,5 +1,7 @@
 # CASO Wine Cooler — Home Assistant Integration
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+
 > **Disclaimer:** This integration was generated with the assistance of AI (Claude by Anthropic). Use at your own risk.
 
 Integrates CASO wine coolers into Home Assistant via the [CASO Smart Kitchen API](https://publickitchenapi.casoapp.com/swagger/index.html).
