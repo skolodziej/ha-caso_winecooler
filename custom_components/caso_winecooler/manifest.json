@@ -1,11 +1,11 @@
 {
   "domain": "caso_winecooler",
   "name": "CASO Wine Cooler",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "documentation": "https://github.com/skolodziej/ha-caso_winecooler",
   "requirements": [],
   "dependencies": [],
-  "codeowners": [],
+  "codeowners": ["@skolodziej"],
   "config_flow": true,
   "iot_class": "cloud_polling"
 }
