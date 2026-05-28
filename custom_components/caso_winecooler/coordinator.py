@@ -39,7 +39,7 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
         self.device_id = device_id
         self.device_name = device_name
         self._request_lock = asyncio.Lock()
-        self._last_request_time: float = 0.0
+        self._last_request_time: float = time.monotonic()
 
     def _headers(self) -> dict:
         return {

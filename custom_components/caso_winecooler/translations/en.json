@@ -20,7 +20,8 @@
     "error": {
       "cannot_connect": "Cannot connect to CASO API",
       "invalid_auth": "Invalid API key",
-      "no_devices": "No devices found for this account"
+      "no_devices": "No devices found for this account",
+      "rate_limit": "API rate limit exceeded — wait a moment and try again"
     },
     "abort": {
       "already_configured": "This device is already configured"

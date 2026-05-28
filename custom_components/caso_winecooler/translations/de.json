@@ -20,7 +20,8 @@
     "error": {
       "cannot_connect": "Verbindung zur CASO API fehlgeschlagen",
       "invalid_auth": "Ungültiger API-Key",
-      "no_devices": "Keine Geräte für diesen Account gefunden"
+      "no_devices": "Keine Geräte für diesen Account gefunden",
+      "rate_limit": "API-Ratenlimit überschritten — warte einen Moment und versuche es erneut"
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet"
