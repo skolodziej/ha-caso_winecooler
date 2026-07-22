@@ -47,4 +47,4 @@ Integrates CASO wine coolers into Home Assistant via the [CASO Smart Kitchen API
 
 The CASO API has an undocumented rate limit. The integration enforces a minimum of 15 seconds between requests and defaults to polling every 10 minutes. Light commands consume one request but update state immediately from the API response without an additional poll.
 
-On first setup the integration intentionally waits 15 seconds before its first status poll to avoid conflicts with the API key validation request made during setup.
+If the API key is rejected (HTTP 401), Home Assistant prompts you to re-enter it via the built-in re-authentication flow.

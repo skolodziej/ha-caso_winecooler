@@ -7,6 +7,7 @@ from datetime import timedelta
 import aiohttp
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -16,6 +17,13 @@ _LOGGER = logging.getLogger(__name__)
 
 # Minimum seconds between any two API requests (stays well within 5 req/min limit)
 _MIN_REQUEST_INTERVAL = 15.0
+
+# How many consecutive 429s we serve stale data for before surfacing the failure
+_MAX_STALE_POLLS = 3
+
+
+class RateLimitError(UpdateFailed):
+    """Raised when the API responds with HTTP 429."""
 
 
 class CasoWinecoolerCoordinator(DataUpdateCoordinator):
@@ -39,7 +47,8 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
         self.device_id = device_id
         self.device_name = device_name
         self._request_lock = asyncio.Lock()
-        self._last_request_time: float = time.monotonic()
+        self._last_request_time: float = 0.0
+        self._consecutive_429 = 0
 
     def _headers(self) -> dict:
         return {
@@ -48,14 +57,21 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
             "Accept": "application/json",
         }
 
-    async def _throttled_post(self, url: str, payload: dict) -> dict | None:
-        """Execute a POST request, enforcing a minimum interval between requests."""
+    async def _post(self, url: str, payload: dict, *, wait: bool) -> dict | None:
+        """Serialized POST request. All API traffic goes through here.
+
+        The lock guarantees only one request runs at a time. When ``wait`` is
+        True the throttle interval is honoured before sending; light commands
+        pass ``wait=False`` so they respond immediately but still update the
+        shared timestamp under the lock (so a following poll spaces itself).
+        """
         async with self._request_lock:
-            elapsed = time.monotonic() - self._last_request_time
-            if elapsed < _MIN_REQUEST_INTERVAL:
-                wait = _MIN_REQUEST_INTERVAL - elapsed
-                _LOGGER.debug("Rate limit: waiting %.1fs before next request", wait)
-                await asyncio.sleep(wait)
+            if wait:
+                elapsed = time.monotonic() - self._last_request_time
+                if elapsed < _MIN_REQUEST_INTERVAL:
+                    wait_for = _MIN_REQUEST_INTERVAL - elapsed
+                    _LOGGER.debug("Rate limit: waiting %.1fs before next request", wait_for)
+                    await asyncio.sleep(wait_for)
 
             try:
                 session = async_get_clientsession(self.hass)
@@ -66,10 +82,12 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:
                     self._last_request_time = time.monotonic()
-                    if resp.status == 429:
-                        raise UpdateFailed("API rate limit exceeded (429) — try increasing the polling interval")
                     if resp.status == 401:
-                        raise UpdateFailed("Invalid API key (401 Unauthorized)")
+                        raise ConfigEntryAuthFailed("Invalid API key (401 Unauthorized)")
+                    if resp.status == 429:
+                        raise RateLimitError(
+                            "API rate limit exceeded (429) — try increasing the polling interval"
+                        )
                     if resp.status == 403:
                         raise UpdateFailed("Access denied (403 Forbidden)")
                     if resp.status not in (200, 204):
@@ -79,56 +97,49 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                             data = await resp.json(content_type=None)
                         except Exception as err:
                             raise UpdateFailed(f"Invalid JSON response: {err}") from err
-                        _LOGGER.debug("Response from %s: keys=%s", url, list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+                        _LOGGER.debug(
+                            "Response from %s: keys=%s",
+                            url,
+                            list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+                        )
                         return data
                     return None
-            except aiohttp.ClientError as err:
+            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 raise UpdateFailed(f"Connection error: {err}") from err
 
     async def _async_update_data(self) -> dict:
         """Fetch current status (1 request per poll interval)."""
         try:
-            result = await self._throttled_post(
+            result = await self._post(
                 f"{API_BASE}/Winecooler/Status",
                 {"technicalDeviceId": self.device_id},
+                wait=True,
             )
-        except UpdateFailed as err:
-            if "429" in str(err) and self.data is not None:
-                _LOGGER.warning("Rate limited (429), keeping last known state")
+        except RateLimitError:
+            if self.data is not None and self._consecutive_429 < _MAX_STALE_POLLS:
+                self._consecutive_429 += 1
+                _LOGGER.warning(
+                    "Rate limited (429), keeping last known state (%d/%d)",
+                    self._consecutive_429,
+                    _MAX_STALE_POLLS,
+                )
                 return self.data
             raise
+        self._consecutive_429 = 0
         if result is None:
             raise UpdateFailed("Empty response from status endpoint")
         return result
 
     async def async_set_light(self, zone: int, light_on: bool) -> None:
-        """Send SetLight command directly — no throttle wait so the UI responds immediately."""
-        try:
-            session = async_get_clientsession(self.hass)
-            async with session.post(
-                f"{API_BASE}/Winecooler/SetLight",
-                headers=self._headers(),
-                json={
-                    "technicalDeviceId": self.device_id,
-                    "zone": zone,
-                    "lightOn": light_on,
-                },
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                self._last_request_time = time.monotonic()
-                if resp.status == 429:
-                    raise UpdateFailed("API rate limit exceeded (429)")
-                if resp.status not in (200, 204):
-                    raise UpdateFailed(f"SetLight failed: {resp.status}")
-                if resp.status == 200:
-                    try:
-                        data = await resp.json(content_type=None)
-                    except Exception as err:
-                        raise UpdateFailed(f"Invalid JSON response: {err}") from err
-                    if data:
-                        self.async_set_updated_data(data)
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Connection error: {err}") from err
-        except UpdateFailed as err:
-            _LOGGER.error("SetLight failed: %s", err)
-            raise
+        """Send SetLight command immediately (no throttle wait) and apply the result."""
+        data = await self._post(
+            f"{API_BASE}/Winecooler/SetLight",
+            {
+                "technicalDeviceId": self.device_id,
+                "zone": zone,
+                "lightOn": light_on,
+            },
+            wait=False,
+        )
+        if data:
+            self.async_set_updated_data(data)

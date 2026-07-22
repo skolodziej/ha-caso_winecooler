@@ -15,6 +15,13 @@
           "device_id": "Device",
           "scan_interval": "Polling interval (seconds)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate CASO Wine Cooler",
+        "description": "Your CASO API key is no longer valid. Enter a new one to reconnect.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "error": {
@@ -24,7 +31,8 @@
       "rate_limit": "API rate limit exceeded — wait a moment and try again"
     },
     "abort": {
-      "already_configured": "This device is already configured"
+      "already_configured": "This device is already configured",
+      "reauth_successful": "Re-authentication was successful"
     }
   }
 }

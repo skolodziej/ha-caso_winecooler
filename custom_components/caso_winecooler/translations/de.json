@@ -15,6 +15,13 @@
           "device_id": "Gerät",
           "scan_interval": "Abfrageintervall (Sekunden)"
         }
+      },
+      "reauth_confirm": {
+        "title": "CASO Weinkühlschrank neu anmelden",
+        "description": "Dein CASO API-Key ist nicht mehr gültig. Gib einen neuen ein, um die Verbindung wiederherzustellen.",
+        "data": {
+          "api_key": "API-Key"
+        }
       }
     },
     "error": {
@@ -24,7 +31,8 @@
       "rate_limit": "API-Ratenlimit überschritten — warte einen Moment und versuche es erneut"
     },
     "abort": {
-      "already_configured": "Dieses Gerät ist bereits eingerichtet"
+      "already_configured": "Dieses Gerät ist bereits eingerichtet",
+      "reauth_successful": "Neu-Anmeldung erfolgreich"
     }
   }
 }

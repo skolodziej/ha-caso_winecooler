@@ -44,9 +44,14 @@ All API calls go through `CasoWinecoolerCoordinator` (one per config entry), whi
 - **`__init__.py`** — creates coordinator, calls `first_refresh`, then sets up platforms
 - **`sensor.py`** / **`light.py`** / **`binary_sensor.py`** — all extend `CasoEntity` + the platform entity class, read from `coordinator.data`
 
-### Rate limiting & startup
+### Rate limiting & requests
 
-The coordinator initialises `_last_request_time = time.monotonic()` so the first poll is always delayed by the full 15s throttle interval. This prevents a 429 caused by the config flow's `GetDevices` request running immediately before `first_refresh`. On 429 the coordinator raises `UpdateFailed`; HA retries at the next poll interval.
+All API traffic goes through `coordinator._post(url, payload, wait=...)`, serialized by `_request_lock`. `wait=True` (polling) honours the 15s throttle interval before sending; `wait=False` (light commands) sends immediately but still updates `_last_request_time` under the lock, so a following poll spaces itself. `_last_request_time` starts at `0.0`, so the first poll fires immediately — startup is never blocked.
+
+Error handling in `_post`:
+- **401** → `ConfigEntryAuthFailed` → HA starts the reauth flow (`async_step_reauth` in `config_flow.py` re-prompts for the API key).
+- **429** → `RateLimitError` (subclass of `UpdateFailed`). `_async_update_data` serves the last known state for up to `_MAX_STALE_POLLS` (3) consecutive polls, then propagates so entities go unavailable.
+- Connection errors / timeouts (`aiohttp.ClientError`, `asyncio.TimeoutError`) → `UpdateFailed`.
 
 ### Two-zone detection
 
