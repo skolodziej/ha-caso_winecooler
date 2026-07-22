@@ -48,10 +48,12 @@ All API calls go through `CasoWinecoolerCoordinator` (one per config entry), whi
 
 All API traffic goes through `coordinator._post(url, payload, wait=...)`, serialized by `_request_lock`. `wait=True` (polling) honours the 15s throttle interval before sending; `wait=False` (light commands) sends immediately but still updates `_last_request_time` under the lock, so a following poll spaces itself. `_last_request_time` starts at `0.0`, so the first poll fires immediately — startup is never blocked.
 
+Requests use a 30s total deadline with a 10s `sock_connect` cap, so a blocked/dropped IP fails in ~10s instead of hanging the full timeout.
+
 Error handling in `_post`:
 - **401** → `ConfigEntryAuthFailed` → HA starts the reauth flow (`async_step_reauth` in `config_flow.py` re-prompts for the API key).
-- **429** → `RateLimitError` (subclass of `UpdateFailed`). `_async_update_data` serves the last known state for up to `_MAX_STALE_POLLS` (3) consecutive polls, then propagates so entities go unavailable.
-- Connection errors / timeouts (`aiohttp.ClientError`, `asyncio.TimeoutError`) → `UpdateFailed`.
+- **429** → `RateLimitError`; **timeout / connection error** → `TransientError`. Both subclass `UpdateFailed`. `_async_update_data` serves the last known state for up to `_MAX_STALE_POLLS` (3) consecutive transient failures before propagating, so entities don't flap to unavailable on a single blip. On the first refresh `self.data` is None, so a real setup failure still surfaces as `ConfigEntryNotReady`.
+- Other statuses (403, unexpected code, empty/invalid body) → plain `UpdateFailed`, surfaced immediately.
 
 ### Two-zone detection
 

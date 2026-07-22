@@ -18,12 +18,22 @@ _LOGGER = logging.getLogger(__name__)
 # Minimum seconds between any two API requests (stays well within 5 req/min limit)
 _MIN_REQUEST_INTERVAL = 15.0
 
-# How many consecutive 429s we serve stale data for before surfacing the failure
+# Overall per-request deadline, and a shorter cap on establishing the connection
+# so a blocked/dropped IP fails in ~10s instead of hanging the full timeout.
+_REQUEST_TIMEOUT = 30.0
+_CONNECT_TIMEOUT = 10.0
+
+# How many consecutive transient failures (429/timeout/connection) we serve the
+# last known state for before surfacing the failure and going unavailable.
 _MAX_STALE_POLLS = 3
 
 
 class RateLimitError(UpdateFailed):
     """Raised when the API responds with HTTP 429."""
+
+
+class TransientError(UpdateFailed):
+    """A timeout or connection error — likely temporary, worth tolerating briefly."""
 
 
 class CasoWinecoolerCoordinator(DataUpdateCoordinator):
@@ -48,7 +58,7 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
         self.device_name = device_name
         self._request_lock = asyncio.Lock()
         self._last_request_time: float = 0.0
-        self._consecutive_429 = 0
+        self._consecutive_failures = 0
 
     def _headers(self) -> dict:
         return {
@@ -79,7 +89,9 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                     url,
                     headers=self._headers(),
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30),
+                    timeout=aiohttp.ClientTimeout(
+                        total=_REQUEST_TIMEOUT, sock_connect=_CONNECT_TIMEOUT
+                    ),
                 ) as resp:
                     self._last_request_time = time.monotonic()
                     if resp.status == 401:
@@ -104,8 +116,13 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                         )
                         return data
                     return None
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-                raise UpdateFailed(f"Connection error: {err}") from err
+            except asyncio.TimeoutError as err:
+                # str(TimeoutError) is empty — spell the deadline out so the UI is useful.
+                raise TransientError(
+                    f"Timeout after {_REQUEST_TIMEOUT:.0f}s (API did not respond)"
+                ) from err
+            except aiohttp.ClientError as err:
+                raise TransientError(f"Connection error: {err}") from err
 
     async def _async_update_data(self) -> dict:
         """Fetch current status (1 request per poll interval)."""
@@ -115,17 +132,22 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                 {"technicalDeviceId": self.device_id},
                 wait=True,
             )
-        except RateLimitError:
-            if self.data is not None and self._consecutive_429 < _MAX_STALE_POLLS:
-                self._consecutive_429 += 1
+        except (RateLimitError, TransientError) as err:
+            # Transient blips (429/timeout/connection) shouldn't flap entities to
+            # unavailable on a single miss — serve the last state for a few polls.
+            # (On the very first refresh self.data is None, so a real setup failure
+            # still surfaces as ConfigEntryNotReady.)
+            if self.data is not None and self._consecutive_failures < _MAX_STALE_POLLS:
+                self._consecutive_failures += 1
                 _LOGGER.warning(
-                    "Rate limited (429), keeping last known state (%d/%d)",
-                    self._consecutive_429,
+                    "%s — keeping last known state (%d/%d)",
+                    err,
+                    self._consecutive_failures,
                     _MAX_STALE_POLLS,
                 )
                 return self.data
             raise
-        self._consecutive_429 = 0
+        self._consecutive_failures = 0
         if result is None:
             raise UpdateFailed("Empty response from status endpoint")
         return result
