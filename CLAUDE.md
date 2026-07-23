@@ -48,7 +48,7 @@ All API calls go through `CasoWinecoolerCoordinator` (one per config entry), whi
 
 All API traffic goes through `coordinator._post(url, payload, wait=...)`, serialized by `_request_lock`. `wait=True` (polling) honours the 15s throttle interval before sending; `wait=False` (light commands) sends immediately but still updates `_last_request_time` under the lock, so a following poll spaces itself. `_last_request_time` starts at `0.0`, so the first poll fires immediately — startup is never blocked.
 
-Requests use a 30s total deadline with a 10s `sock_connect` cap, so a blocked/dropped IP fails in ~10s instead of hanging the full timeout.
+Requests use a 60s total deadline with a 10s `sock_connect` cap, so a blocked/dropped IP fails in ~10s instead of hanging the full timeout. The 60s deadline is deliberately high: the CASO `Status` endpoint is server-side slow (~30s+ observed) even though it returns only the last stored state, so a 30s deadline caused first-refresh timeouts. The status poll is a background coordinator task, so a slow response only delays the data, it doesn't block the event loop; the one visible cost is a ~30s wait during `first_refresh` at startup (HA logs a slow-setup warning), which is unavoidable because two-zone detection needs the first status before entities are created.
 
 Error handling in `_post`:
 - **401** → `ConfigEntryAuthFailed` → HA starts the reauth flow (`async_step_reauth` in `config_flow.py` re-prompts for the API key).
