@@ -26,6 +26,12 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# The CASO API rate-limits aggressively; setup fires GetDevices + the type probe
+# close together, so retry a 429 a couple of times with a backoff instead of
+# failing the flow (or, for the probe, misclassifying the device as wine).
+_MAX_429_RETRIES = 2
+_RETRY_BACKOFF = 15.0
+
 
 async def _detect_device_type(api_key: str, device_id: str) -> str:
     """Detect whether a device is a BBQ cooler or a wine cooler.
@@ -38,14 +44,19 @@ async def _detect_device_type(api_key: str, device_id: str) -> str:
     headers = {"x-api-key": api_key, "Accept": "application/json"}
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{API_BASE}/BbqCooler/GetStatus",
-                headers=headers,
-                params={"technicalDeviceId": device_id},
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status == 200:
-                    return DEVICE_TYPE_BBQ
+            for attempt in range(_MAX_429_RETRIES + 1):
+                async with session.get(
+                    f"{API_BASE}/BbqCooler/GetStatus",
+                    headers=headers,
+                    params={"technicalDeviceId": device_id},
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as resp:
+                    if resp.status == 429 and attempt < _MAX_429_RETRIES:
+                        await asyncio.sleep(_RETRY_BACKOFF)
+                        continue
+                    if resp.status == 200:
+                        return DEVICE_TYPE_BBQ
+                    break
     except (aiohttp.ClientError, asyncio.TimeoutError):
         _LOGGER.debug("BBQ probe failed for %s, assuming wine cooler", device_id)
     return DEVICE_TYPE_WINE
@@ -58,21 +69,26 @@ async def _fetch_devices(api_key: str) -> list[dict]:
         "Accept": "application/json",
     }
     async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{API_BASE}/Devices/GetDevices",
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as resp:
-            if resp.status == 401:
-                raise ValueError("invalid_auth")
-            if resp.status == 429:
-                raise ValueError("rate_limit")
-            if resp.status != 200:
-                raise ValueError("cannot_connect")
-            try:
-                return await resp.json(content_type=None)
-            except Exception as err:
-                raise ValueError("cannot_connect") from err
+        for attempt in range(_MAX_429_RETRIES + 1):
+            async with session.get(
+                f"{API_BASE}/Devices/GetDevices",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 429 and attempt < _MAX_429_RETRIES:
+                    await asyncio.sleep(_RETRY_BACKOFF)
+                    continue
+                if resp.status == 401:
+                    raise ValueError("invalid_auth")
+                if resp.status == 429:
+                    raise ValueError("rate_limit")
+                if resp.status != 200:
+                    raise ValueError("cannot_connect")
+                try:
+                    return await resp.json(content_type=None)
+                except Exception as err:
+                    raise ValueError("cannot_connect") from err
+    raise ValueError("cannot_connect")
 
 
 async def _validate_api_key(hass: HomeAssistant, api_key: str) -> list[dict]:

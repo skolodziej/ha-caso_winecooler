@@ -29,6 +29,14 @@ _CONNECT_TIMEOUT = 10.0
 # last known state for before surfacing the failure and going unavailable.
 _MAX_STALE_POLLS = 3
 
+# The CASO API rate-limits aggressively (a burst of a few requests within a
+# second can already return 429), which is easy to trip during setup when the
+# config flow's GetDevices + type probe land just before the first poll. Retry a
+# 429 a couple of times with a backoff so it resolves silently instead of
+# surfacing as an error the user has to wait out.
+_MAX_429_RETRIES = 2
+_RETRY_BACKOFF = 15.0
+
 
 class RateLimitError(UpdateFailed):
     """Raised when the API responds with HTTP 429."""
@@ -96,48 +104,58 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Rate limit: waiting %.1fs before next request", wait_for)
                     await asyncio.sleep(wait_for)
 
-            try:
-                session = async_get_clientsession(self.hass)
-                async with session.request(
-                    method,
-                    url,
-                    headers=self._headers(),
-                    json=json,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(
-                        total=_REQUEST_TIMEOUT, sock_connect=_CONNECT_TIMEOUT
-                    ),
-                ) as resp:
-                    self._last_request_time = time.monotonic()
-                    if resp.status == 401:
-                        raise ConfigEntryAuthFailed("Invalid API key (401 Unauthorized)")
-                    if resp.status == 429:
-                        raise RateLimitError(
-                            "API rate limit exceeded (429) — try increasing the polling interval"
-                        )
-                    if resp.status == 403:
-                        raise UpdateFailed("Access denied (403 Forbidden)")
-                    if resp.status not in (200, 204):
-                        raise UpdateFailed(f"Unexpected API response: {resp.status}")
-                    if resp.status == 200:
-                        try:
-                            data = await resp.json(content_type=None)
-                        except Exception as err:
-                            raise UpdateFailed(f"Invalid JSON response: {err}") from err
-                        _LOGGER.debug(
-                            "Response from %s: keys=%s",
-                            url,
-                            list(data.keys()) if isinstance(data, dict) else type(data).__name__,
-                        )
-                        return data
-                    return None
-            except asyncio.TimeoutError as err:
-                # str(TimeoutError) is empty — spell the deadline out so the UI is useful.
-                raise TransientError(
-                    f"Timeout after {_REQUEST_TIMEOUT:.0f}s (API did not respond)"
-                ) from err
-            except aiohttp.ClientError as err:
-                raise TransientError(f"Connection error: {err}") from err
+            session = async_get_clientsession(self.hass)
+            for attempt in range(_MAX_429_RETRIES + 1):
+                try:
+                    async with session.request(
+                        method,
+                        url,
+                        headers=self._headers(),
+                        json=json,
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(
+                            total=_REQUEST_TIMEOUT, sock_connect=_CONNECT_TIMEOUT
+                        ),
+                    ) as resp:
+                        self._last_request_time = time.monotonic()
+                        if resp.status == 401:
+                            raise ConfigEntryAuthFailed("Invalid API key (401 Unauthorized)")
+                        if resp.status == 429:
+                            if attempt < _MAX_429_RETRIES:
+                                _LOGGER.debug(
+                                    "Rate limited (429), retrying in %.0fs (%d/%d)",
+                                    _RETRY_BACKOFF,
+                                    attempt + 1,
+                                    _MAX_429_RETRIES,
+                                )
+                                await asyncio.sleep(_RETRY_BACKOFF)
+                                continue
+                            raise RateLimitError(
+                                "API rate limit exceeded (429) — try increasing the polling interval"
+                            )
+                        if resp.status == 403:
+                            raise UpdateFailed("Access denied (403 Forbidden)")
+                        if resp.status not in (200, 204):
+                            raise UpdateFailed(f"Unexpected API response: {resp.status}")
+                        if resp.status == 200:
+                            try:
+                                data = await resp.json(content_type=None)
+                            except Exception as err:
+                                raise UpdateFailed(f"Invalid JSON response: {err}") from err
+                            _LOGGER.debug(
+                                "Response from %s: keys=%s",
+                                url,
+                                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+                            )
+                            return data
+                        return None
+                except asyncio.TimeoutError as err:
+                    # str(TimeoutError) is empty — spell the deadline out so the UI is useful.
+                    raise TransientError(
+                        f"Timeout after {_REQUEST_TIMEOUT:.0f}s (API did not respond)"
+                    ) from err
+                except aiohttp.ClientError as err:
+                    raise TransientError(f"Connection error: {err}") from err
 
     async def _fetch_status(self, *, wait: bool) -> dict | None:
         """Fetch device status via the endpoint matching this device's type."""

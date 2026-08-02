@@ -52,6 +52,8 @@ Both also expose the last device report timestamp (sensor).
 
 ## Rate limiting
 
-The CASO API has an undocumented rate limit. The integration enforces a minimum of 15 seconds between requests and defaults to polling every 10 minutes. Light commands consume one request but update state immediately from the API response without an additional poll.
+The CASO API has an undocumented rate limit and throttles bursts aggressively. The integration enforces a minimum of 15 seconds between requests and defaults to polling every 10 minutes. Light commands consume one request but update state immediately from the API response without an additional poll.
+
+If the API briefly returns `429 (rate limit exceeded)` — most likely while adding the integration, when several requests happen close together — the integration automatically retries with a short backoff, so setup resolves on its own without any error to act on.
 
 If the API key is rejected (HTTP 401), Home Assistant prompts you to re-enter it via the built-in re-authentication flow.

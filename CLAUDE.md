@@ -58,7 +58,7 @@ Requests use a 30s total deadline with a 10s `sock_connect` cap, so a blocked/dr
 
 Error handling in `_request`:
 - **401** → `ConfigEntryAuthFailed` → HA starts the reauth flow (`async_step_reauth` in `config_flow.py` re-prompts for the API key).
-- **429** → `RateLimitError`; **timeout / connection error** → `TransientError`. Both subclass `UpdateFailed`. `_async_update_data` serves the last known state for up to `_MAX_STALE_POLLS` (3) consecutive transient failures before propagating, so entities don't flap to unavailable on a single blip. On the first refresh `self.data` is None, so a real setup failure still surfaces as `ConfigEntryNotReady`.
+- **429** → retried in-place up to `_MAX_429_RETRIES` (2) times with a `_RETRY_BACKOFF` (15s) wait before raising `RateLimitError`; the config-flow requests (`_fetch_devices`, `_detect_device_type`) do the same. This absorbs the aggressive burst throttling that setup trips (GetDevices + type probe + first poll landing together) so it resolves silently instead of surfacing an error. **timeout / connection error** → `TransientError`. `RateLimitError` and `TransientError` both subclass `UpdateFailed`; `_async_update_data` serves the last known state for up to `_MAX_STALE_POLLS` (3) consecutive transient failures before propagating, so entities don't flap to unavailable on a single blip. On the first refresh `self.data` is None, so a real setup failure still surfaces as `ConfigEntryNotReady`.
 - Other statuses (403, unexpected code, empty/invalid body) → plain `UpdateFailed`, surfaced immediately.
 
 ### Two-zone detection (wine coolers only)
