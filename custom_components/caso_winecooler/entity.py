@@ -36,5 +36,5 @@ class CasoEntity(CoordinatorEntity[CasoWinecoolerCoordinator]):
             "identifiers": {(DOMAIN, self._device_id)},
             "name": self._device_name,
             "manufacturer": "CASO",
-            "model": "Wine Cooler",
+            "model": "BBQ Cooler" if self.coordinator.is_bbq else "Wine Cooler",
         }

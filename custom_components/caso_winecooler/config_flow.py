@@ -1,4 +1,5 @@
 """Config flow for CASO Wine Cooler integration."""
+import asyncio
 import logging
 from typing import Any
 
@@ -14,13 +15,40 @@ from .const import (
     CONF_API_KEY,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
+    CONF_DEVICE_TYPE,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEVICE_TYPE_BBQ,
+    DEVICE_TYPE_WINE,
     DOMAIN,
     MIN_SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def _detect_device_type(api_key: str, device_id: str) -> str:
+    """Detect whether a device is a BBQ cooler or a wine cooler.
+
+    GetDevices exposes no type field, so we probe the BBQ status endpoint:
+    a 200 means the device is a BBQ cooler; anything else (typically 400 for a
+    wine cooler, or a network hiccup) falls back to wine cooler, which is both
+    the common case and the originally supported type.
+    """
+    headers = {"x-api-key": api_key, "Accept": "application/json"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{API_BASE}/BbqCooler/GetStatus",
+                headers=headers,
+                params={"technicalDeviceId": device_id},
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status == 200:
+                    return DEVICE_TYPE_BBQ
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        _LOGGER.debug("BBQ probe failed for %s, assuming wine cooler", device_id)
+    return DEVICE_TYPE_WINE
 
 
 async def _fetch_devices(api_key: str) -> list[dict]:
@@ -148,12 +176,15 @@ class CasoWinecoolerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(device_id)
             self._abort_if_unique_id_configured()
 
+            device_type = await _detect_device_type(self._api_key, device_id)
+
             return self.async_create_entry(
                 title=device_name,
                 data={
                     CONF_API_KEY: self._api_key,
                     CONF_DEVICE_ID: device_id,
                     CONF_DEVICE_NAME: device_name,
+                    CONF_DEVICE_TYPE: device_type,
                     CONF_SCAN_INTERVAL: scan_interval,
                 },
             )

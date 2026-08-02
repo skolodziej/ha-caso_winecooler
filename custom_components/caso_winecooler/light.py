@@ -48,6 +48,15 @@ ZONE_DESCRIPTIONS: tuple[CasoLightDescription, ...] = (
     ),
 )
 
+# BBQ cooler: a single light, no zones. The coordinator ignores the zone for
+# BBQ devices and sends the BbqCooler/SetLight payload instead.
+BBQ_LIGHT_DESCRIPTION = CasoLightDescription(
+    key="light",
+    name="Light",
+    data_key="light",
+    zone=0,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -56,11 +65,13 @@ async def async_setup_entry(
 ) -> None:
     coordinator: CasoWinecoolerCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    two_zone = is_two_zone(data)
 
     entities: list[CasoLightEntity] = []
 
-    if two_zone:
+    if coordinator.is_bbq:
+        # BBQ cooler: one light, no zones.
+        entities.append(CasoLightEntity(coordinator, entry, BBQ_LIGHT_DESCRIPTION))
+    elif is_two_zone(data):
         # Combined "all zones" entity + individual zone entities
         entities.append(CasoAllZonesLightEntity(coordinator, entry, ALL_ZONES_DESCRIPTION))
         entities.extend(

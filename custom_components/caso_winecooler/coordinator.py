@@ -1,4 +1,4 @@
-"""Data update coordinator for CASO Wine Cooler."""
+"""Data update coordinator for CASO Wine Cooler / BBQ Cooler."""
 import asyncio
 import logging
 import time
@@ -11,7 +11,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import API_BASE
+from .const import API_BASE, DEVICE_TYPE_BBQ, DEVICE_TYPE_WINE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,16 +48,19 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
         device_id: str,
         device_name: str,
         scan_interval: int,
+        device_type: str = DEVICE_TYPE_WINE,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            name=f"CASO Winecooler {device_name}",
+            name=f"CASO {device_name}",
             update_interval=timedelta(seconds=scan_interval),
         )
         self.api_key = api_key
         self.device_id = device_id
         self.device_name = device_name
+        self.device_type = device_type
+        self.is_bbq = device_type == DEVICE_TYPE_BBQ
         self._request_lock = asyncio.Lock()
         self._last_request_time: float = 0.0
         self._consecutive_failures = 0
@@ -69,8 +72,16 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
             "Accept": "application/json",
         }
 
-    async def _post(self, url: str, payload: dict, *, wait: bool) -> dict | None:
-        """Serialized POST request. All API traffic goes through here.
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        wait: bool,
+        json: dict | None = None,
+        params: dict | None = None,
+    ) -> dict | None:
+        """Serialized HTTP request. All API traffic goes through here.
 
         The lock guarantees only one request runs at a time. When ``wait`` is
         True the throttle interval is honoured before sending; light commands
@@ -87,10 +98,12 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
 
             try:
                 session = async_get_clientsession(self.hass)
-                async with session.post(
+                async with session.request(
+                    method,
                     url,
                     headers=self._headers(),
-                    json=payload,
+                    json=json,
+                    params=params,
                     timeout=aiohttp.ClientTimeout(
                         total=_REQUEST_TIMEOUT, sock_connect=_CONNECT_TIMEOUT
                     ),
@@ -126,14 +139,28 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
             except aiohttp.ClientError as err:
                 raise TransientError(f"Connection error: {err}") from err
 
+    async def _fetch_status(self, *, wait: bool) -> dict | None:
+        """Fetch device status via the endpoint matching this device's type."""
+        if self.is_bbq:
+            # BBQ cooler: GET with the id as a query parameter.
+            return await self._request(
+                "GET",
+                f"{API_BASE}/BbqCooler/GetStatus",
+                wait=wait,
+                params={"technicalDeviceId": self.device_id},
+            )
+        # Wine cooler: POST with the id in the body.
+        return await self._request(
+            "POST",
+            f"{API_BASE}/Winecooler/Status",
+            wait=wait,
+            json={"technicalDeviceId": self.device_id},
+        )
+
     async def _async_update_data(self) -> dict:
         """Fetch current status (1 request per poll interval)."""
         try:
-            result = await self._post(
-                f"{API_BASE}/Winecooler/Status",
-                {"technicalDeviceId": self.device_id},
-                wait=True,
-            )
+            result = await self._fetch_status(wait=True)
         except (RateLimitError, TransientError) as err:
             # Transient blips (429/timeout/connection) shouldn't flap entities to
             # unavailable on a single miss — serve the last state for a few polls.
@@ -156,14 +183,24 @@ class CasoWinecoolerCoordinator(DataUpdateCoordinator):
 
     async def async_set_light(self, zone: int, light_on: bool) -> None:
         """Send SetLight command immediately (no throttle wait) and apply the result."""
-        data = await self._post(
-            f"{API_BASE}/Winecooler/SetLight",
-            {
-                "technicalDeviceId": self.device_id,
-                "zone": zone,
-                "lightOn": light_on,
-            },
-            wait=False,
-        )
+        if self.is_bbq:
+            # BBQ cooler has a single light and no zones.
+            data = await self._request(
+                "POST",
+                f"{API_BASE}/BbqCooler/SetLight",
+                wait=False,
+                json={"technicalDeviceId": self.device_id, "light": light_on},
+            )
+        else:
+            data = await self._request(
+                "POST",
+                f"{API_BASE}/Winecooler/SetLight",
+                wait=False,
+                json={
+                    "technicalDeviceId": self.device_id,
+                    "zone": zone,
+                    "lightOn": light_on,
+                },
+            )
         if data:
             self.async_set_updated_data(data)

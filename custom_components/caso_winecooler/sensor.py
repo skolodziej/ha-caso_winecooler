@@ -1,4 +1,4 @@
-"""Temperature sensors for CASO Wine Cooler."""
+"""Temperature sensors for CASO Wine Cooler / BBQ Cooler."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -29,6 +29,16 @@ def _parse_utc_timestamp(v: str | None) -> datetime | None:
     if dt is not None and dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _parse_float(v) -> float | None:
+    """BBQ cooler reports temperature as a string — coerce it to a number."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -82,6 +92,26 @@ SENSOR_DESCRIPTIONS: tuple[CasoSensorDescription, ...] = (
 )
 
 
+# BBQ cooler: a single temperature (reported as a string) and no target/zones.
+BBQ_SENSOR_DESCRIPTIONS: tuple[CasoSensorDescription, ...] = (
+    CasoSensorDescription(
+        key="temperature",
+        name="Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        data_key="temperature",
+        value_fn=_parse_float,
+    ),
+    CasoSensorDescription(
+        key="last_updated",
+        name="Last Updated",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        data_key="logTimestampUtc",
+        value_fn=_parse_utc_timestamp,
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -89,18 +119,24 @@ async def async_setup_entry(
 ) -> None:
     coordinator: CasoWinecoolerCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    two_zone = is_two_zone(data)
 
-    entities = [
-        CasoTemperatureSensor(coordinator, entry, desc)
-        for desc in SENSOR_DESCRIPTIONS
-        if desc.zone == 1 or two_zone
-    ]
+    if coordinator.is_bbq:
+        entities = [
+            CasoTemperatureSensor(coordinator, entry, desc)
+            for desc in BBQ_SENSOR_DESCRIPTIONS
+        ]
+    else:
+        two_zone = is_two_zone(data)
+        entities = [
+            CasoTemperatureSensor(coordinator, entry, desc)
+            for desc in SENSOR_DESCRIPTIONS
+            if desc.zone == 1 or two_zone
+        ]
     async_add_entities(entities)
 
 
 class CasoTemperatureSensor(CasoEntity, SensorEntity):
-    """A temperature sensor entity for one zone of the wine cooler."""
+    """A temperature (or timestamp) sensor entity for the cooler."""
 
     entity_description: CasoSensorDescription
 
