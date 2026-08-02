@@ -18,11 +18,11 @@ _LOGGER = logging.getLogger(__name__)
 # Minimum seconds between any two API requests (stays well within 5 req/min limit)
 _MIN_REQUEST_INTERVAL = 15.0
 
-# Overall per-request deadline. The CASO Status endpoint is server-side slow
-# (~30s+ observed) even though it only returns the last stored state, so the
-# deadline must sit well above that. A shorter sock_connect cap still lets a
-# blocked/dropped IP fail fast (~10s) instead of waiting out the full deadline.
-_REQUEST_TIMEOUT = 60.0
+# Overall per-request deadline. A healthy device answers in well under a second;
+# the shorter sock_connect cap lets a blocked/dropped IP fail fast (~10s) instead
+# of waiting out the full deadline. (A cooler stuck in a fault state can make the
+# cloud's Status response hang, which surfaces as a TransientError timeout.)
+_REQUEST_TIMEOUT = 30.0
 _CONNECT_TIMEOUT = 10.0
 
 # How many consecutive transient failures (429/timeout/connection) we serve the
