@@ -4,16 +4,23 @@
 
 > **Disclaimer:** This integration was generated with the assistance of AI (Claude by Anthropic). Use at your own risk.
 
-Integrates CASO wine coolers into Home Assistant via the [CASO Smart Kitchen API](https://publickitchenapi.casoapp.com/swagger/index.html).
+Integrates CASO coolers into Home Assistant via the [CASO Smart Kitchen API](https://publickitchenapi.casoapp.com/swagger/index.html). Supports both **wine coolers** (one or two zones) and the smaller **BBQ cooler**; the device type is detected automatically during setup.
 
 ## Features
 
+**Wine cooler:**
 - Current temperature per zone (sensor)
 - Target temperature per zone (sensor)
-- Last device report timestamp (sensor)
 - Interior light control — all zones at once or individually (light)
 - Power state per zone (binary sensor)
 - Automatic single-zone / two-zone detection
+
+**BBQ cooler:**
+- Current temperature (sensor)
+- Light control (light)
+- Power state (binary sensor)
+
+Both also expose the last device report timestamp (sensor).
 
 > **Note:** The CASO API does not provide a temperature set endpoint. Target temperature is read-only.
 

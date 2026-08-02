@@ -41,6 +41,17 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[CasoBinarySensorDescription, ...] = (
 )
 
 
+# BBQ cooler: a single power state, no zones.
+BBQ_BINARY_SENSOR_DESCRIPTIONS: tuple[CasoBinarySensorDescription, ...] = (
+    CasoBinarySensorDescription(
+        key="power",
+        name="Power",
+        device_class=BinarySensorDeviceClass.POWER,
+        data_key="power",
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -48,13 +59,19 @@ async def async_setup_entry(
 ) -> None:
     coordinator: CasoWinecoolerCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    two_zone = is_two_zone(data)
 
-    entities = [
-        CasoPowerSensor(coordinator, entry, desc)
-        for desc in BINARY_SENSOR_DESCRIPTIONS
-        if desc.zone == 1 or two_zone
-    ]
+    if coordinator.is_bbq:
+        entities = [
+            CasoPowerSensor(coordinator, entry, desc)
+            for desc in BBQ_BINARY_SENSOR_DESCRIPTIONS
+        ]
+    else:
+        two_zone = is_two_zone(data)
+        entities = [
+            CasoPowerSensor(coordinator, entry, desc)
+            for desc in BINARY_SENSOR_DESCRIPTIONS
+            if desc.zone == 1 or two_zone
+        ]
     async_add_entities(entities)
 
 
