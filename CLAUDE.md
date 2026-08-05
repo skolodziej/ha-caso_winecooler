@@ -85,7 +85,7 @@ For wine coolers, `light.py` creates a "Light" entity using `zone=0` (controls a
 
 | Entity | Platform | `data_key` | Notes |
 |---|---|---|---|
-| Temperature | sensor | `temperature` | Reported as a **string** — parsed to float via `_parse_float` |
+| Temperature | sensor | `temperature` | Reported as a **string** — numeric values become floats; the extremes `"LO"`/`"HI"` map to 1 °C / 12 °C (converted if the device is in °F) via `_coerce_temperature`, so they don't show as Unknown |
 | Last Updated | sensor | `logTimestampUtc` | Same as wine |
 | Power | binary_sensor | `power` | — |
 | Light | light | `light` | `POST BbqCooler/SetLight {light}` |

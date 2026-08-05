@@ -31,14 +31,10 @@ def _parse_utc_timestamp(v: str | None) -> datetime | None:
     return dt
 
 
-def _parse_float(v) -> float | None:
-    """BBQ cooler reports temperature as a string — coerce it to a number."""
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
+# The BBQ cooler reports temperature as a string: usually numeric ("6"), but
+# "LO"/"HI" at the extremes of its range. Per the device spec LO = 1 °C and
+# HI = 12 °C (converted when the device reports in Fahrenheit).
+_BBQ_LEVELS_CELSIUS = {"LO": 1.0, "HI": 12.0}
 
 
 @dataclass(frozen=True)
@@ -99,8 +95,8 @@ BBQ_SENSOR_DESCRIPTIONS: tuple[CasoSensorDescription, ...] = (
         name="Temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
         data_key="temperature",
-        value_fn=_parse_float,
     ),
     CasoSensorDescription(
         key="last_updated",
@@ -145,14 +141,42 @@ class CasoTemperatureSensor(CasoEntity, SensorEntity):
         if self.coordinator.data is None:
             return None
         raw = self.coordinator.data.get(self.entity_description.data_key)
+        if self.entity_description.device_class == SensorDeviceClass.TEMPERATURE:
+            return self._coerce_temperature(raw)
         if self.entity_description.value_fn is not None:
             return self.entity_description.value_fn(raw)
         return raw
+
+    def _coerce_temperature(self, raw) -> float | None:
+        """Coerce a temperature reading to a number.
+
+        Wine coolers report integers; the BBQ cooler reports a string that is
+        usually numeric ("6") but is "LO"/"HI" at the extremes of its range.
+        Map those to the documented setpoints (converting to °F when the device
+        reports in Fahrenheit) so the entity shows a value instead of Unknown.
+        """
+        if raw is None:
+            return None
+        if isinstance(raw, str) and raw.strip().upper() in _BBQ_LEVELS_CELSIUS:
+            celsius = _BBQ_LEVELS_CELSIUS[raw.strip().upper()]
+            if self._is_fahrenheit():
+                return round(celsius * 9 / 5 + 32)
+            return celsius
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _is_fahrenheit(self) -> bool:
+        return bool(
+            self.coordinator.data
+            and self.coordinator.data.get("temperatureUnit") == "F"
+        )
 
     @property
     def native_unit_of_measurement(self) -> str | None:
         if self.entity_description.device_class != SensorDeviceClass.TEMPERATURE:
             return None
-        if self.coordinator.data and self.coordinator.data.get("temperatureUnit") == "F":
+        if self._is_fahrenheit():
             return UnitOfTemperature.FAHRENHEIT
         return UnitOfTemperature.CELSIUS
