@@ -95,8 +95,11 @@ async def _validate_api_key(hass: HomeAssistant, api_key: str) -> list[dict]:
     """Validate key and return devices. Raises ValueError with error key on failure."""
     try:
         devices = await _fetch_devices(api_key)
-    except aiohttp.ClientError:
-        raise ValueError("cannot_connect")
+    except (aiohttp.ClientError, TimeoutError) as err:
+        # A ClientTimeout deadline raises asyncio.TimeoutError (TimeoutError on
+        # 3.11+), which is not an aiohttp.ClientError — catch it too so a slow
+        # CASO API maps to cannot_connect instead of an unhandled "Unknown error".
+        raise ValueError("cannot_connect") from err
     if not devices:
         raise ValueError("no_devices")
     return devices
